@@ -3,6 +3,9 @@ package user
 import (
 	"bytes"
 	"fmt"
+	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/config"
+	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/module"
+	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/server"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,11 +37,72 @@ func TestAddUser(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+// UID 测试用户ID
+var UID = "10000"
+var friendUID = "10001"
+
+// Token 测试用户token
+var Token = "token122323"
+
+// CleanAllTables 清空所有表
+func CleanAllTables(c *config.Context) error {
+	var dropSqls []string
+	_, err := c.DB().SelectBySql("select  concat('DELETE FROM ','`', table_name,'`') FROM information_schema.tables WHERE table_schema = 'test' and table_name <> 'gorp_migrations'").Load(&dropSqls)
+	for _, sql := range dropSqls {
+		_, err = c.DB().UpdateBySql(sql).Exec()
+		if err != nil {
+			return err
+		}
+	}
+	return err
+}
+
+// NewTestServer 创建一个测试服务器
+func NewTestServer(args ...string) (*server.Server, *config.Context) {
+	cfg := config.New()
+	cfg.Test = true
+	// cfg.TracingOn = true
+	// cfg.TracerAddr = "49.235.106.135:6831"
+	cfg.DB.MySQLAddr = "root:demo@tcp(127.0.0.1)/test?charset=utf8mb4&parseTime=true"
+	cfg.DB.Migration = false
+	ctx := config.NewContext(cfg)
+	// ctx.Event = event.New(ctx)
+	// 先清空旧数据
+	err := CleanAllTables(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	// ctx.Event = event.New(ctx)
+	err = ctx.Cache().Set(cfg.Cache.TokenCachePrefix+Token, UID+"@test")
+	if err != nil {
+		panic(err)
+	}
+
+	// _, err = ctx.DB().InsertBySql("insert into `app`(app_id,app_key,status) VALUES('wukongchat',substring(MD5(RAND()),1,20),1)").Exec()
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// 创建server
+	s := server.New(ctx)
+	// ctx.Server = s
+	s.GetRoute().UseGin(ctx.Tracer().GinMiddle())
+	ctx.SetHttpRoute(s.GetRoute())
+	err = module.Setup(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	return s, ctx
+
+}
+
 func TestLogin(t *testing.T) {
-	s, ctx := testutil.NewTestServer()
+	s, ctx := NewTestServer()
 	m := NewManager(ctx)
 	m.Route(s.GetRoute())
-	//清除数据
+	//清除数据x
 	err := testutil.CleanAllTables(ctx)
 	assert.NoError(t, err)
 	w := httptest.NewRecorder()

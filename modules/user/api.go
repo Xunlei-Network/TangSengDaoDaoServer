@@ -164,6 +164,7 @@ func (u *User) Route(r *wkhttp.WKHttp) {
 	v := r.Group("/v1")
 	{
 
+		v.POST("/user/checkSMSCode", u.checkSMSCode)         //校验SMS验证码
 		v.POST("/user/register", u.register)                 //用户注册
 		v.POST("/user/login", u.login)                       // 用户登录
 		v.POST("/user/usernamelogin", u.usernameLogin)       // 用户名登录
@@ -1105,6 +1106,47 @@ func (u *User) sentWelcomeMsg(publicIP, uid string) {
 	}
 	//保存登录日志
 	u.loginLog.add(uid, publicIP)
+}
+
+type checkSMSCodeReq struct {
+	Phone string `json:"phone"`
+	Zone  string `json:"zone"`
+	Code  string `json:"code"`
+}
+
+// 验证SMS验证码
+func (u *User) checkSMSCode(c *wkhttp.Context) {
+	var req checkSMSCodeReq
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseError(errors.New("请求数据格式有误！"))
+		return
+	}
+	registerSpan := u.ctx.Tracer().StartSpan(
+		"user.register",
+		opentracing.ChildOf(c.GetSpanContext()),
+	)
+	defer registerSpan.Finish()
+	registerSpanCtx := u.ctx.Tracer().ContextWithSpan(context.Background(), registerSpan)
+
+	registerSpan.SetTag("username", fmt.Sprintf("%s%s", req.Zone, req.Phone))
+	//验证手机号是否注册
+	userInfo, err := u.db.QueryByUsernameCxt(registerSpanCtx, fmt.Sprintf("%s%s", req.Zone, req.Phone))
+	if err != nil {
+		u.Error("查询用户信息失败！", zap.String("username", req.Phone))
+		c.ResponseError(err)
+		return
+	}
+	if userInfo != nil {
+		c.ResponseError(errors.New("该用户已存在"))
+		return
+	}
+	//线上验证短信验证码
+	/*err = u.smsServie.Verify(registerSpanCtx, req.Zone, req.Phone, req.Code, commonapi.CodeTypeRegister)
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}*/
+	c.ResponseOK()
 }
 
 // 注册

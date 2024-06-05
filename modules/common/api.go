@@ -57,6 +57,11 @@ func (cn *Common) Route(r *wkhttp.WKHttp) {
 		commonNoAuth.GET("/keepalive", cn.getKeepAliveVideo)   // 获取后台运行引导视频
 		commonNoAuth.GET("/updater/:os/:version", cn.updater)  // 版本更新检查（兼容tauri）
 		commonNoAuth.GET("/pcupdater/:os", cn.getPCNewVersion) // pc版本更新检查
+
+		commonNoAuth.GET("/agreement/user", cn.userAgreement)       // 用户协议
+		commonNoAuth.GET("/agreement/privacy", cn.privacyAgreement) // 隐私协议
+
+		commonNoAuth.GET("/globalconfig", cn.globalConfig) // 全局配置
 	}
 
 	r.GET("/v1/health", func(c *wkhttp.Context) {
@@ -780,4 +785,28 @@ func Countrys() []*Country {
 			Name: "巴西",
 		},
 	}
+}
+
+func (cn *Common) userAgreement(c *wkhttp.Context) {
+	h5URL := fmt.Sprintf("%s/userAgreement.html", cn.ctx.GetConfig().External.H5BaseURL)
+	c.JSON(http.StatusOK, gin.H{
+		"url": h5URL,
+	})
+}
+
+func (cn *Common) privacyAgreement(c *wkhttp.Context) {
+	h5URL := fmt.Sprintf("%s/privacyAgreement.html", cn.ctx.GetConfig().External.H5BaseURL)
+	c.JSON(http.StatusOK, gin.H{
+		"url": h5URL,
+	})
+}
+
+type globalConfigResp struct {
+	RegisterUserInvitationOn int `json:"register_user_invitation_on"` // 开启用户注册邀请流程
+}
+
+func (cn *Common) globalConfig(c *wkhttp.Context) {
+	c.JSON(http.StatusOK, &globalConfigResp{
+		RegisterUserInvitationOn: 1,
+	})
 }
