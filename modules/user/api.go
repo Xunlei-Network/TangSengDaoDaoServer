@@ -53,6 +53,7 @@ type User struct {
 	friendDB      *friendDB
 	deviceDB      *deviceDB
 	smsServie     commonapi.ISMSService
+	emailServie   commonapi.IEmailService
 	fileService   file.IService
 	settingDB     *SettingDB
 	onlineDB      *onlineDB
@@ -169,6 +170,8 @@ func (u *User) Route(r *wkhttp.WKHttp) {
 		v.POST("/user/login", u.login)                       // 用户登录
 		v.POST("/user/usernamelogin", u.usernameLogin)       // 用户名登录
 		v.POST("/user/usernameregister", u.usernameRegister) // 用户名注册
+
+		v.POST("/user/createInviteCode", u.createInviteCode) // 生成邀请码
 
 		v.POST("/user/pwdforget_web3", u.resetPwdWithWeb3PublicKey) // 通过web3公钥重置密码
 		v.GET("/user/web3verifytext", u.getVerifyText)              // 获取验证字符串
@@ -1203,11 +1206,25 @@ func (u *User) register(c *wkhttp.Context) {
 	defer registerSpan.Finish()
 	registerSpanCtx := u.ctx.Tracer().ContextWithSpan(context.Background(), registerSpan)
 
-	registerSpan.SetTag("username", fmt.Sprintf("%s%s", req.Zone, req.Phone))
+	var username string
+	if fmt.Sprintf("%s%s", req.Zone, req.Phone) != "" || len(fmt.Sprintf("%s%s", req.Zone, req.Phone)) > 0 {
+		username = fmt.Sprintf("%s%s", req.Zone, req.Phone)
+	} else {
+		username = fmt.Sprintf("%s", req.Email)
+	}
+
+	registerSpan.SetTag("username", username)
+
+	//registerSpan.SetTag("username", fmt.Sprintf("%s%s", req.Zone, req.Phone))
 	//验证手机号是否注册
-	userInfo, err := u.db.QueryByUsernameCxt(registerSpanCtx, fmt.Sprintf("%s%s", req.Zone, req.Phone))
+	userInfo, err := u.db.QueryByUsernameCxt(registerSpanCtx, username)
 	if err != nil {
-		u.Error("查询用户信息失败！", zap.String("username", req.Phone))
+		if req.Phone != "" {
+			u.Error("查询用户信息失败！", zap.String("username", req.Phone))
+		} else {
+			u.Error("查询用户信息失败！", zap.String("username", req.Email))
+		}
+		//u.Error("查询用户信息失败！", zap.String("username", req.Phone))
 		c.ResponseError(err)
 		return
 	}
@@ -1216,14 +1233,20 @@ func (u *User) register(c *wkhttp.Context) {
 		return
 	}
 	//测试模式
-	if strings.TrimSpace(u.ctx.GetConfig().SMSCode) != "" {
+	if len(u.ctx.GetConfig().SMSCode) > 0 {
 		if strings.TrimSpace(u.ctx.GetConfig().SMSCode) != req.Code {
 			c.ResponseError(errors.New("验证码错误"))
 			return
 		}
 	} else {
+		////线上验证短信验证码
+		//err = u.smsServie.Verify(registerSpanCtx, req.Zone, req.Phone, req.Code, commonapi.CodeTypeRegister)
 		//线上验证短信验证码
-		err = u.smsServie.Verify(registerSpanCtx, req.Zone, req.Phone, req.Code, commonapi.CodeTypeRegister)
+		if req.Zone != "" && req.Phone != "" {
+			err = u.smsServie.Verify(registerSpanCtx, req.Zone, req.Phone, req.Code, commonapi.CodeTypeRegister)
+		} else {
+			err = u.emailServie.Verify(registerSpanCtx, req.Email, req.Code, commonapi.CodeTypeRegister)
+		}
 		if err != nil {
 			c.ResponseError(err)
 			return
@@ -1241,6 +1264,67 @@ func (u *User) register(c *wkhttp.Context) {
 		Device:   req.Device,
 	}
 	u.createUser(registerSpanCtx, model, c, req.InviteCode)
+}
+
+// 生成邀请码
+func (u *User) createInviteCode(c *wkhttp.Context) {
+	var req inviteReq
+	var inviteCode string
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseError(errors.New("请求数据格式有误！"))
+		return
+	}
+	if req.Fromuser == "" {
+		c.ResponseError(errors.New("发送者用户不能为空！"))
+		return
+	}
+
+	if len(u.ctx.GetConfig().InviteCode) > 0 {
+		if strings.TrimSpace(u.ctx.GetConfig().InviteCode) != req.Invitecode {
+			c.ResponseError(errors.New("验证码错误"))
+			return
+		}
+	} else {
+		// 循环生成邀请码
+		for {
+			inviteCode = commonapi.GenerateCode()
+			inviteCodes, err := u.ctx.GetRedisConn().Hmget("invitecodes", "invitecode")
+			if err != nil {
+				panic("连接redis失败：获取邀请码失败！")
+			}
+			inviteCodeExist := false
+			for _, code := range inviteCodes {
+				if code == inviteCode {
+					inviteCodeExist = true
+				}
+			}
+			//如果邀请码在数据已存在，则重新生成
+			if inviteCodeExist {
+				continue
+			} else {
+				break
+			}
+		}
+
+		// 将邀请码存放到Redis里面，使用hmash数据结构来存储
+		// key值是表名
+		err := u.ctx.GetRedisConn().Hmset("invitecodes",
+			"fromuser", req.Fromuser,
+			"touer", "",
+			"invitecode", inviteCode,
+			"status", string(req.Status),
+			"datemonth", time.Now().Format("2006-01-02 15:04")) //.Set(req.Invitecode, string(inviteJson))
+		if err != nil {
+			c.ResponseError(errors.New("存储用户邀请码失败！"))
+			return
+		}
+		c.Response(map[string]string{
+			"code": http.StatusText(http.StatusCreated),
+			"data": req.Invitecode,
+		})
+	}
+
+	return
 }
 
 // 搜索用户
@@ -2593,6 +2677,7 @@ type registerReq struct {
 	Name       string     `json:"name"`
 	Zone       string     `json:"zone"`
 	Phone      string     `json:"phone"`
+	Email      string     `json:"email"`
 	Code       string     `json:"code"`
 	Password   string     `json:"password"`
 	Flag       uint8      `json:"flag"`        // 注册设备的标记 0.APP 1.PC
@@ -2617,6 +2702,14 @@ func (r registerReq) CheckRegister() error {
 		return errors.New("密码长度必须大于6位！")
 	}
 	return nil
+}
+
+type inviteReq struct {
+	Fromuser   string `json:"fromuser"`
+	Touser     string `json:"touser"`
+	Invitecode string `json:"invitecode"`
+	Status     int    `json:"status"`
+	Datemonth  string `json:"datemonth"`
 }
 
 // 设置聊天密码请求

@@ -19,4 +19,6 @@ const (
 const (
 	// CacheKeySMSCode 短信验证码的缓存key
 	CacheKeySMSCode string = "smscode:"
+	// CacheKeyEmailCode 邮箱验证码的缓存key
+	CacheKeyEmailCode string = "emailcode:"
 )

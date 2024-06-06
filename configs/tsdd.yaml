@@ -17,6 +17,14 @@ wukongIM:
   apiURL: "http://192.168.1.13:5001" # 悟空IM的api地址 格式： http://xx.xx.xx.xx:5001   http://47.76.188.89:8090
   managerToken: "" # 悟空IM的管理者token 悟空IM配置了就需要填写，没配置就不需要
 
+##################### 邀请码配置 ####################
+inviteCode: "abcdef" # 测试邀请码， 如果不为空，则邀请码为该值。
+
+##################### 阿里云邮箱配置 ####################
+FromUser: ""  # 发送者邮箱,如果不为空，则短信验证码为该值。
+FromPassword: "" # 发送着邮箱,如果不为空，则短信验证码为该值。
+Host: ""    # 发送者的主机地址加端口，默认端口号是80,如果不为空，则短信验证码为该值。
+
 ##################### db ####################
 db:
   mysqlAddr: "root:QaWsEd246!#%@tcp(rm-3ns708jgrwov2l3fpto.mysql.rds.aliyuncs.com:3306)/tsdd_dev?charset=utf8mb4&parseTime=true" # mysql连接地址
